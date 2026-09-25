@@ -763,6 +763,11 @@ using Pk3h = PICkit2V2.PK3Helpers;
 // Bug Fix: If autosearch on startup is disabled, don't use autosearch on PICkit
 //          operating system update either
 // Bug Fix: Fix programmer-to-go memory size check for PICkit3
+//
+// version 3.28.06 - 8 Sep 2026 JAKA
+// Feature: Add support to Linux / Mono. Thanks to Eric Wheeler
+// Feature: PIC32AK support. So far just reading. Requires new programmer firmware
+
 
 namespace PICkit2V2
 {
@@ -3729,6 +3734,10 @@ namespace PICkit2V2
 					updateGUI(KONST.DontUpdateMemDisplays, updateGuiControls, KONST.DontUpdateProtections);
 					return false;
 				}
+				/*if (updateGuiControls && allFamiliesSelect == true)	// fix buttons in alldevice mode when importing hex
+				{							// already fixed in downloadNewFirmware() functions, this code can be removed
+					fullEnableGUIControls();
+				}*/
 			}
 			Pk2.SetVDDVoltage((float)numUpDnVDD.Value, 0.85F, false);  // ensure voltage set to expected value.
 																	   //if (!checkBoxEEMem.Enabled && (Pk2.DevFile.PartsList[Pk2.ActivePart].EEMem > 0))
@@ -7311,6 +7320,88 @@ namespace PICkit2V2
 		private bool verifyConfig(int configWords, int configLocation)
 		{
 			// Verify Configuration --------------------------------------------------------------------
+			if (Pk2.FamilyIsdsPIC33AK())
+            {
+				//bool akVerify = Pk2.VerifyConfigOutsideProgMemWithAddress();
+				bool akVerify = true;
+				Pk2.RunScript(KONST.PROG_ENTRY, 1);
+				Pk2.DownloadAddress3Raw((int)Pk2.DevFile.PartsList[Pk2.ActivePart].ConfigAddr);
+				Pk2.RunScript(KONST.PROGMEM_ADDRSET, 1);
+
+				byte[] upload_buffer = new byte[KONST.UploadBufferSize];
+
+				int bytesPerWord = Pk2.DevFile.Families[Pk2.GetActiveFamily()].BytesPerLocation;
+				int scriptRunsToFillUpload = KONST.UploadBufferSize /
+					(Pk2.DevFile.PartsList[Pk2.ActivePart].ProgMemRdWords * bytesPerWord);
+				int wordsPerLoop = scriptRunsToFillUpload * Pk2.DevFile.PartsList[Pk2.ActivePart].ProgMemRdWords;
+				int wordsRead = 0;
+
+				int endOfBuffer = (int)Pk2.DevFile.PartsList[Pk2.ActivePart].ConfigWords;
+
+				uint[] verifyBuffer = new uint[endOfBuffer];    // We read the whole config memory to this array
+
+				do
+				{
+					Pk2.RunScriptUploadNoLen(KONST.PROGMEM_RD, scriptRunsToFillUpload);
+
+					Array.Copy(Pk2.Usb_read_array, 1, upload_buffer, 0, KONST.USB_REPORTLENGTH);
+					Pk2.UploadDataNoLen();
+					Array.Copy(Pk2.Usb_read_array, 1, upload_buffer, KONST.USB_REPORTLENGTH, KONST.USB_REPORTLENGTH);
+					int uploadIndex = 0;
+					for (int word = 0; word < wordsPerLoop; word++)
+					{
+						int bite = 0;
+						uint memWord = (uint)upload_buffer[uploadIndex + bite++];
+						if (bite < bytesPerWord)
+						{
+							memWord |= (uint)upload_buffer[uploadIndex + bite++] << 8;
+						}
+						if (bite < bytesPerWord)
+						{
+							memWord |= (uint)upload_buffer[uploadIndex + bite++] << 16;
+						}
+						if (bite < bytesPerWord)
+						{
+							memWord |= (uint)upload_buffer[uploadIndex + bite++] << 24;
+						}
+						uploadIndex += bite;
+
+						verifyBuffer[wordsRead++] = memWord;
+						if (wordsRead == Pk2.DevFile.PartsList[Pk2.ActivePart].ConfigWords)
+						{
+							break; // for cases where ProgramMemSize%WordsPerLoop != 0
+						}
+					}
+				} while (wordsRead < endOfBuffer && !FormPICkit2.stopOperation);
+
+				Pk2.RunScript(KONST.PROG_EXIT, 1);
+
+				for (int word = 0; word < endOfBuffer; word++)
+				{
+					//uint readWord = verifyBuffer[word];
+					int expectedIndex = word;
+					if (expectedIndex >= 0x200 && expectedIndex < 0x400)
+						expectedIndex -= 0x200;
+					else if (expectedIndex >= 0x600 && expectedIndex < 0x800)
+						expectedIndex -= 0x200;
+					//uint expectedWord = Pk2.DeviceBuffers.ConfigWords[expectedIndex];
+
+
+					if (verifyBuffer[word] != Pk2.DeviceBuffers.ConfigWords[expectedIndex])
+					{
+						conditionalVDDOff();
+						displayStatusWindow.Text = "Verification of config failed at word ";
+						displayStatusWindow.Text += string.Format("0x{0:X6}", word*bytesPerWord + (int)Pk2.DevFile.PartsList[Pk2.ActivePart].ConfigAddr);
+						displayStatusWindow.Text += "\nExpected " + string.Format("0x{0:X6}", Pk2.DeviceBuffers.ConfigWords[expectedIndex]);
+						displayStatusWindow.Text += " got " + string.Format("0x{0:X6}", verifyBuffer[word]);
+						statusWindowColor = Constants.StatusColor.red;
+						updateGUI(KONST.UpdateMemoryDisplays, KONST.EnableMclrCheckBox, KONST.DontUpdateProtections);
+						return false;
+					}
+				}
+				return true;
+            }
+
 			if ((configWords > 0) && (configLocation > Pk2.DevFile.PartsList[Pk2.ActivePart].ProgramMem)
 					&& checkBoxProgMemEnabled.Checked)
 			{ // Don't read config words for any part where they are stored in program memory.
@@ -7334,9 +7425,6 @@ namespace PICkit2V2
 						if (Pk2.DevFile.PartsList[Pk2.ActivePart].IgnoreBytes == 0x000C
 							|| (Pk2.DevFile.PartsList[Pk2.ActivePart].ProgMemPanelBufs & 0x02) == 0x02)    // Q40,Q41,Q43,Q71,Q83,Q84 configuration is read/written byte at a time
 							config = swap2Bytes(config);
-						//if (word == (Pk2.DevFile.PartsList[Pk2.ActivePart].IgnoreAddress - Pk2.DevFile.PartsList[Pk2.ActivePart].ConfigAddr) / Pk2.DevFile.Families[Pk2.GetActiveFamily()].BytesPerLocation)
-						//	config |= 0xff00;                       // Some compilers put 0xff to non-existing config byte. Ensure that we expect is, since read function also ors 0xff to it.
-
 					}
 					//$$$
 					if (Pk2.DevFile.Families[Pk2.GetActiveFamily()].ProgMemShift > 0)
@@ -7360,16 +7448,6 @@ namespace PICkit2V2
 					{
 						configExpected = Pk2.DeviceBuffers.ConfigWords[word];       // Mask is 0xffff for words > 9
 					}
-
-					/*
-					// JAKA
-					if (Pk2.DevFile.Families[Pk2.GetActiveFamily()].FamilyName == "Midrange/1.8V Min MSB1st" ||
-						Pk2.DevFile.Families[Pk2.GetActiveFamily()].FamilyName == "PIC18/PIC18F MSB1st")
-					{	// Would perhaps be safe to perform this check on all devices and not just MSB1st, because ignoreAdrress isn't set on most devices. But better be safe.
-						//if (word == (Pk2.DevFile.PartsList[Pk2.ActivePart].IgnoreAddress - Pk2.DevFile.PartsList[Pk2.ActivePart].ConfigAddr) / Pk2.DevFile.Families[Pk2.GetActiveFamily()].BytesPerLocation)
-						//	configExpected |= 0xff00;                       // Some compilers put 0xff to non-existing config byte. Ensure that we expect is, since read function also ors 0xff to it.
-					}
-					// END JAKA */
 
 					if (Pk2.DevFile.PartsList[Pk2.ActivePart].PartName == "PIC12F529")
 					{
@@ -7500,7 +7578,21 @@ namespace PICkit2V2
 			}
 			else
 			{
-				partialEnableGUIControls();
+				if (allFamiliesSelect)
+                {
+					Pk2.PrepNewPart(true);
+					setGUIVoltageLimits(true);
+					Pk2.SetVDDVoltage((float)numUpDnVDD.Value, 0.85F, false);
+					if (comboBoxSelectPart.SelectedIndex == 0)
+					{
+						displayStatusWindow.Text = displayStatusWindow.Text + "\n[All families active, please select device.]";
+						semiDisableGUIControls();   // Disable read/write buttons if no part selected and all families mode
+					}
+					else
+						fullEnableGUIControls();
+				}
+				else
+					partialEnableGUIControls();		// Original behavior, if all families not active
 			}
 
 			checkForPowerErrors();
@@ -7647,7 +7739,22 @@ namespace PICkit2V2
 			}
 			else
 			{
-				partialEnableGUIControls();
+				if(allFamiliesSelect)
+
+				{
+					Pk2.PrepNewPart(true);
+					setGUIVoltageLimits(true);
+					Pk2.SetVDDVoltage((float)numUpDnVDD.Value, 0.85F, false);
+					if (comboBoxSelectPart.SelectedIndex == 0)
+					{
+						displayStatusWindow.Text = displayStatusWindow.Text + "\n[All families active, please select device.]";
+						semiDisableGUIControls();   // Disable read/write buttons if no part selected and all families
+					}
+					else
+						fullEnableGUIControls();
+				}
+				else
+					partialEnableGUIControls();
 			}
 
 			checkForPowerErrors();

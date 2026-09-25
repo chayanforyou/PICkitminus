@@ -120,7 +120,7 @@
   <data name="textBox1.Text" xml:space="preserve">
     <value>Copyright (c) 2006-2012, Microchip Technology Inc. All rights reserved.
 Modifications for MSB1st type PICs by bequest333 2018.
-PICkitminus by jaka 2021-2025.
+PICkitminus by jaka 2021-2026.
 Thanks to:
 PICkitPlus team for providing updated device files until 2020
 Adem Gdk for adding SPI FLASH devices and testing SPI FLASH implementation
