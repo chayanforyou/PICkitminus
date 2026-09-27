@@ -1,7 +1,7 @@
 PICkit- software suite
 ======================
 
-__To download this software for Windows, see 'Releases' on right edge of this github page.__  &rarr;
+__Update 27.9.2026. The device file and downloads of all releases have been removed due to copyright violation claim from PICkitPlus team. I need to remove about 400 devices from the device file which PICkitPlus team have added or fixed. This will take time, but I try to get the cleaned device file and downloads back some day.__
 
 You can use your trusty old PICkit2 and PICkit3 with the new Microchip PIC microcontrollers with PICkitminus program. It adds support for many chips not covered by the original PICkit software. This repository has the GUI version of the software. See my another repository for the command line version, pk2cmd. Both will automatically detect PICkit2, PICkit3 and PKOB. The PICkit3 firmware is improved and now supports all the features as PICkit2 does.
 
