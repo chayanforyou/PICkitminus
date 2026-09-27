@@ -1019,6 +1019,71 @@ namespace PICkit2V2
 			return true;
 		}
 
+		public static bool BlankCheckConfigOutsideProgMemWithAddress()
+		{
+			RunScript(KONST.PROG_ENTRY, 1);
+			DownloadAddress3Raw((int)DevFile.PartsList[ActivePart].ConfigAddr);
+			RunScript(KONST.PROGMEM_ADDRSET, 1);
+
+			byte[] upload_buffer = new byte[KONST.UploadBufferSize];
+
+			int bytesPerWord = DevFile.Families[GetActiveFamily()].BytesPerLocation;
+			int scriptRunsToFillUpload = KONST.UploadBufferSize /
+				(DevFile.PartsList[ActivePart].ProgMemRdWords * bytesPerWord);
+			int wordsPerLoop = scriptRunsToFillUpload * DevFile.PartsList[ActivePart].ProgMemRdWords;
+			int wordsRead = 0;
+
+			int endOfBuffer = (int)DevFile.PartsList[ActivePart].ConfigWords;
+
+			uint[] verifyBuffer = new uint[endOfBuffer];    // We read the whole config memory to this array
+
+			do
+			{
+				RunScriptUploadNoLen(KONST.PROGMEM_RD, scriptRunsToFillUpload);
+
+				Array.Copy(Usb_read_array, 1, upload_buffer, 0, KONST.USB_REPORTLENGTH);
+				UploadDataNoLen();
+				Array.Copy(Usb_read_array, 1, upload_buffer, KONST.USB_REPORTLENGTH, KONST.USB_REPORTLENGTH);
+				int uploadIndex = 0;
+				for (int word = 0; word < wordsPerLoop; word++)
+				{
+					int bite = 0;
+					uint memWord = (uint)upload_buffer[uploadIndex + bite++];
+					if (bite < bytesPerWord)
+					{
+						memWord |= (uint)upload_buffer[uploadIndex + bite++] << 8;
+					}
+					if (bite < bytesPerWord)
+					{
+						memWord |= (uint)upload_buffer[uploadIndex + bite++] << 16;
+					}
+					if (bite < bytesPerWord)
+					{
+						memWord |= (uint)upload_buffer[uploadIndex + bite++] << 24;
+					}
+					uploadIndex += bite;
+
+					verifyBuffer[wordsRead++] = memWord;
+					if (wordsRead == DevFile.PartsList[ActivePart].ConfigWords)
+					{
+						break; // for cases where ProgramMemSize%WordsPerLoop != 0
+					}
+				}
+			} while (wordsRead < endOfBuffer && !FormPICkit2.stopOperation);
+
+			RunScript(KONST.PROG_EXIT, 1);
+
+			for (int word = 0; word < endOfBuffer; word++)
+			{
+				if (verifyBuffer[word] != DevFile.Families[GetActiveFamily()].BlankValue)
+				{
+					return false;
+				}
+			}
+
+			return true;
+		}
+
 		public static void ReadBandGap()
 		{
 			RunScript(KONST.PROG_ENTRY, 1);

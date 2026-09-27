@@ -5026,9 +5026,12 @@ namespace PICkit2V2
 
 				int wordsPerWrite = Pk2.DevFile.PartsList[Pk2.ActivePart].ProgMemWrWords;
 				int bytesPerWord = Pk2.DevFile.Families[Pk2.GetActiveFamily()].BytesPerLocation;
+				int qWordWriteAddressWords = 0;
+				if (Pk2.FamilyIsdsPIC33AK())
+					qWordWriteAddressWords = 1;
 				int scriptRunsToUseDownload = KONST.DownLoadBufferSize /
-					(wordsPerWrite * bytesPerWord);
-				int wordsPerLoop = scriptRunsToUseDownload * wordsPerWrite;
+					((wordsPerWrite + qWordWriteAddressWords) * bytesPerWord);
+				int wordsPerLoop = scriptRunsToUseDownload * (wordsPerWrite + qWordWriteAddressWords);
 				int wordsWritten = 0;
 
 				// PIC24/dsPIC: handle cases where wordsPerWrite would cause TBLPAG update to not happen at 0x8000
@@ -5108,6 +5111,14 @@ namespace PICkit2V2
 							{
 								break; // for cases where ProgramMemSize%WordsPerLoop != 0
 							}
+
+							if (Pk2.FamilyIsdsPIC33AK())
+                            {
+								if (word % wordsPerWrite == 0)
+                                {
+
+                                }
+                            }
 
 							uint memWord = Pk2.DeviceBuffers.ProgramMemory[wordsWritten++];
 
@@ -6389,7 +6400,22 @@ namespace PICkit2V2
 
 
 			// Blank Check Configuration --------------------------------------------------------------------
-			if ((configWords > 0) && (configLocation > Pk2.DevFile.PartsList[Pk2.ActivePart].ProgramMem) && !stopOperation)
+			if (Pk2.FamilyIsdsPIC33AK())
+			{
+				displayStatusWindow.Text += "Config... ";
+				this.Update();
+				bool AkBlank = Pk2.BlankCheckConfigOutsideProgMemWithAddress();
+
+				if (AkBlank == false)
+				{
+					conditionalVDDOff();
+					displayStatusWindow.Text = "Configuration is not blank.";
+					statusWindowColor = Constants.StatusColor.red;
+					updateGUI(KONST.UpdateMemoryDisplays, KONST.DontEnableMclrCheckBox, KONST.DontUpdateProtections);
+					return false;
+				}
+			}
+			else if ((configWords > 0) && (configLocation > Pk2.DevFile.PartsList[Pk2.ActivePart].ProgramMem) && !stopOperation)
 			{ // Don't read config words for any part where they are stored in program memory.
 				displayStatusWindow.Text += "Config... ";
 				//displayStatusWindow.Update();
@@ -6453,7 +6479,7 @@ namespace PICkit2V2
 					}
 				}
 			}
-
+			
 
 			Pk2.RunScript(KONST.PROG_EXIT, 1);
 			conditionalVDDOff();
